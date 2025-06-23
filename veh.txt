@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Price Prediction ML Project</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.10.0/tf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            padding: 5px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            background: transparent;
+            border: none;
+            font-size: 16px;
+        }
+
+        .tab.active {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .tab-content {
+            display: none;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #fff, #f8f9ff);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .chart-container {
+            margin: 20px 0;
+            padding: 20px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .model-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .form-group select, .form-group input {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group select:focus, .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .prediction-result {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            margin: 20px 0;
+            box-shadow: 0 20px 40px rgba(102, 126, 234, 0.3);
+        }
+
+        .prediction-price {
+            font-size: 3em;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .model-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: #f8f9ff;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .log-area {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            height: 200px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .data-table th, .data-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .data-table th {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            font-weight: 600;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9ff;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .tabs {
+                flex-direction: column;
+            }
+            
+            .model-form {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚗 Vehicle Price Prediction ML Project</h1>
+            <p>Advanced Machine Learning System for Accurate Vehicle Price Estimation</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('data')">📊 Data Upload & EDA</button>
+            <button class="tab" onclick="showTab('preprocessing')">🔧 Preprocessing</button>
+            <button class="tab" onclick="showTab('modeling')">🤖 ML Modeling</button>
+            <button class="tab" onclick="showTab('prediction')">🎯 Price Prediction</button>
+        </div>
+
+        <!-- Data Upload & EDA Tab -->
+        <div id="data" class="tab-content active">
+            <h2>📊 Data Upload & Exploratory Data Analysis</h2>
+            
+            <div class="upload-area" onclick="document.getElementById('csvFile').click()">
+                <h3>📁 Upload Vehicle Dataset (CSV)</h3>
+                <p>Click here to select your vehicle dataset CSV file</p>
+                <input type="file" id="csvFile" accept=".csv" style="display: none;">
+            </div>
+
+            <div class="stats-grid" id="dataStats" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalRecords">0</div>
+                    <div class="stat-label">Total Records</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalFeatures">0</div>
+                    <div class="stat-label">Features</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="avgPrice">$0</div>
+                    <div class="stat-label">Average Price</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="priceRange">$0</div>
+                    <div class="stat-label">Price Range</div>
+                </div>
+            </div>
+
+            <div class="chart-container" style="display: none;" id="chartContainer">
+                <canvas id="priceDistChart"></canvas>
+            </div>
+
+            <div id="dataPreview" style="display: none;">
+                <h3>📋 Data Preview</h3>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" id="previewTable"></table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Preprocessing Tab -->
+        <div id="preprocessing" class="tab-content">
+            <h2>🔧 Data Preprocessing</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="missingValues">0</div>
+                    <div class="stat-label">Missing Values</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="categoricalFeatures">0</div>
+                    <div class="stat-label">Categorical Features</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="numericFeatures">0</div>
+                    <div class="stat-label">Numeric Features</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="preprocessedRecords">0</div>
+                    <div class="stat-label">Clean Records</div>
+                </div>
+            </div>
+
+            <button class="btn" onclick="preprocessData()">🔄 Start Preprocessing</button>
+            
+            <div class="progress-bar" style="display: none;" id="preprocessProgress">
+                <div class="progress-fill" id="preprocessFill"></div>
+            </div>
+
+            <div class="log-area" id="preprocessLog"></div>
+
+            <div class="chart-container" style="display: none;" id="correlationChart">
+                <canvas id="correlationMatrix"></canvas>
+            </div>
+        </div>
+
+        <!-- ML Modeling Tab -->
+        <div id="modeling" class="tab-content">
+            <h2>🤖 Machine Learning Model Training</h2>
+            
+            <div class="model-form">
+                <div class="form-group">
+                    <label>Model Type:</label>
+                    <select id="modelType">
+                        <option value="neural_network">Neural Network</option>
+                        <option value="linear_regression">Linear Regression</option>
+                        <option value="random_forest">Random Forest (Simulated)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Train/Test Split:</label>
+                    <select id="trainTestSplit">
+                        <option value="0.8">80/20</option>
+                        <option value="0.7">70/30</option>
+                        <option value="0.9">90/10</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Learning Rate:</label>
+                    <input type="number" id="learningRate" value="0.001" step="0.001" min="0.0001" max="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Epochs:</label>
+                    <input type="number" id="epochs" value="100" min="10" max="1000">
+                </div>
+            </div>
+
+            <button class="btn" onclick="trainModel()" id="trainBtn">🚀 Train Model</button>
+            
+            <div class="progress-bar" style="display: none;" id="trainingProgress">
+                <div class="progress-fill" id="trainingFill"></div>
+            </div>
+
+            <div class="model-metrics" id="modelMetrics" style="display: none;">
+                <div class="metric-card">
+                    <div class="stat-value" id="maeValue">0</div>
+                    <div class="stat-label">MAE</div>
+                </div>
+                <div class="metric-card">
+                    <div class="stat-value" id="mseValue">0</div>
+                    <div class="stat-label">MSE</div>
+                </div>
+                <div class="metric-card">
+                    <div class="stat-value" id="rmseValue">0</div>
+                    <div class="stat-label">RMSE</div>
+                </div>
+                <div class="metric-card">
+                    <div class="stat-value" id="r2Value">0</div>
+                    <div class="stat-label">R² Score</div>
+                </div>
+            </div>
+
+            <div class="chart-container" style="display: none;" id="trainingChart">
+                <canvas id="lossChart"></canvas>
+            </div>
+
+            <div class="log-area" id="trainingLog"></div>
+        </div>
+
+        <!-- Prediction Tab -->
+        <div id="prediction" class="tab-content">
+            <h2>🎯 Vehicle Price Prediction</h2>
+            
+            <div class="model-form" id="predictionForm">
+                <div class="form-group">
+                    <label>Make:</label>
+                    <select id="predMake">
+                        <option value="">Select Make</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Model:</label>
+                    <select id="predModel">
+                        <option value="">Select Model</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Year:</label>
+                    <input type="number" id="predYear" min="1990" max="2025" placeholder="e.g., 2020">
+                </div>
+                <div class="form-group">
+                    <label>Mileage:</label>
+                    <input type="number" id="predMileage" min="0" placeholder="e.g., 50000">
+                </div>
+                <div class="form-group">
+                    <label>Engine Cylinders:</label>
+                    <select id="predCylinders">
+                        <option value="4">4 Cylinders</option>
+                        <option value="6">6 Cylinders</option>
+                        <option value="8">8 Cylinders</option>
+                        <option value="12">12 Cylinders</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Fuel Type:</label>
+                    <select id="predFuel">
+                        <option value="Gasoline">Gasoline</option>
+                        <option value="Diesel">Diesel</option>
+                        <option value="Electric">Electric</option>
+                        <option value="Hybrid">Hybrid</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Transmission:</label>
+                    <select id="predTransmission">
+                        <option value="Automatic">Automatic</option>
+                        <option value="Manual">Manual</option>
+                        <option value="CVT">CVT</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Body Type:</label>
+                    <select id="predBody">
+                        <option value="Sedan">Sedan</option>
+                        <option value="SUV">SUV</option>
+                        <option value="Pickup Truck">Pickup Truck</option>
+                        <option value="Coupe">Coupe</option>
+                        <option value="Hatchback">Hatchback</option>
+                    </select>
+                </div>
+            </div>
+
+            <button class="btn" onclick="predictPrice()" id="predictBtn" disabled>💰 Predict Price</button>
+            
+            <div class="prediction-result" id="predictionResult" style="display: none;">
+                <h3>🎯 Predicted Price</h3>
+                <div class="prediction-price" id="predictedPrice">$0</div>
+                <p>Based on the provided vehicle specifications</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let vehicleData = [];
+        let processedData = [];
+        let model = null;
+        let scaler = {
+            mean: {},
+            std: {}
+        };
+        let encoders = {};
+        let features = [];
+        let trainingHistory = [];
+
+        // Tab switching
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+
+        // File upload handling
+        document.getElementById('csvFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                Papa.parse(file, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        vehicleData = results.data;
+                        displayDataStats();
+                        displayDataPreview();
+                        createPriceDistribution();
+                        populatePredictionForm();
+                        log('Data uploaded successfully: ' + vehicleData.length + ' records loaded', 'preprocessLog');
+                    },
+                    error: function(error) {
+                        alert('Error parsing CSV: ' + error.message);
+                    }
+                });
+            }
+        });
+
+        // Display data statistics
+        function displayDataStats() {
+            const prices = vehicleData.map(row => parseFloat(row.price)).filter(p => !isNaN(p));
+            const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+            const minPrice = Math.min(...prices);
+            const maxPrice = Math.max(...prices);
+
+            document.getElementById('totalRecords').textContent = vehicleData.length;
+            document.getElementById('totalFeatures').textContent = Object.keys(vehicleData[0] || {}).length;
+            document.getElementById('avgPrice').textContent = '$' + Math.round(avgPrice).toLocaleString();
+            document.getElementById('priceRange').textContent = '$' + (maxPrice - minPrice).toLocaleString();
+            
+            document.getElementById('dataStats').style.display = 'grid';
+        }
+
+        // Display data preview
+        function displayDataPreview() {
+            const table = document.getElementById('previewTable');
+            const headers = Object.keys(vehicleData[0] || {});
+            
+            // Create header
+            const headerRow = table.createTHead().insertRow();
+            headers.forEach(header => {
+                const th = document.createElement('th');
+                th.textContent = header;
+                headerRow.appendChild(th);
+            });
+            
+            // Create body with first 10 rows
+            const tbody = table.createTBody();
+            vehicleData.slice(0, 10).forEach(row => {
+                const tr = tbody.insertRow();
+                headers.forEach(header => {
+                    const td = tr.insertCell();
+                    td.textContent = row[header] || 'N/A';
+                });
+            });
+            
+            document.getElementById('dataPreview').style.display = 'block';
+        }
+
+        // Create price distribution chart
+        function createPriceDistribution() {
+            const prices = vehicleData.map(row => parseFloat(row.price)).filter(p => !isNaN(p));
+            const bins = 20;
+            const binSize = (Math.max(...prices) - Math.min(...prices)) / bins;
+            const histogram = Array(bins).fill(0);
+            
+            prices.forEach(price => {
+                const binIndex = Math.min(Math.floor((price - Math.min(...prices)) / binSize), bins - 1);
+                histogram[binIndex]++;
+            });
+            
+            const ctx = document.getElementById('priceDistChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: histogram.map((_, i) => '$' + Math.round(Math.min(...prices) + i * binSize / 1000) + 'K'),
+                    datasets: [{
+                        label: 'Number of Vehicles',
+                        data: histogram,
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Price Distribution'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            document.getElementById('chartContainer').style.display = 'block';
+        }
+
+        // Preprocessing
+        function preprocessData() {
+            if (vehicleData.length === 0) {
+                alert('Please upload data first!');
+                return;
+            }
+
+            document.getElementById('preprocessProgress').style.display = 'block';
+            let progress = 0;
+            
+            const progressInterval = setInterval(() => {
+                progress += 10;
+                document.getElementById('preprocessFill').style.width = progress + '%';
+                
+                if (progress >= 100) {
+                    clearInterval(progressInterval);
+                    performPreprocessing();
+                }
+            }, 200);
+        }
+
+        function performPreprocessing() {
+            log('Starting data preprocessing...', 'preprocessLog');
+            
+            // Clean data and handle missing values
+            processedData = vehicleData.filter(row => {
+                return row.price && !isNaN(parseFloat(row.price)) && 
+                       row.year && !isNaN(parseInt(row.year)) &&
+                       row.mileage !== undefined && row.mileage !== null;
+            });
+            
+            log(`Removed ${vehicleData.length - processedData.length} records with missing critical data`, 'preprocessLog');
+            
+            // Identify feature types
+            const categoricalFeats = ['make', 'fuel', 'transmission', 'body', 'drivetrain'];
+            const numericFeats = ['year', 'mileage', 'cylinders', 'doors'];
+            
+            // Create encoders for categorical variables
+            categoricalFeats.forEach(feat => {
+                const uniqueValues = [...new Set(processedData.map(row => row[feat]))].filter(v => v);
+                encoders[feat] = {};
+                uniqueValues.forEach((value, index) => {
+                    encoders[feat][value] = index;
+                });
+                log(`Encoded ${feat}: ${uniqueValues.length} unique values`, 'preprocessLog');
+            });
+            
+            // Calculate scaling parameters for numeric features
+            numericFeats.forEach(feat => {
+                const values = processedData.map(row => parseFloat(row[feat])).filter(v => !isNaN(v));
+                scaler.mean[feat] = values.reduce((a, b) => a + b, 0) / values.length;
+                scaler.std[feat] = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - scaler.mean[feat], 2), 0) / values.length);
+                log(`Scaling ${feat}: mean=${scaler.mean[feat].toFixed(2)}, std=${scaler.std[feat].toFixed(2)}`, 'preprocessLog');
+            });
+            
+            // Update preprocessing stats
+            document.getElementById('missingValues').textContent = vehicleData.length - processedData.length;
+            document.getElementById('categoricalFeatures').textContent = categoricalFeats.length;
+            document.getElementById('numericFeatures').textContent = numericFeats.length;
+            document.getElementById('preprocessedRecords').textContent = processedData.length;
+            
+            features = [...categoricalFeats, ...numericFeats];
+            log('Preprocessing completed successfully!', 'preprocessLog');
+            
+            // Enable model training
+            document.getElementById('trainBtn').disabled = false;
+        }
+
+        // Model training
+        async function trainModel() {
+            if (processedData.length === 0) {
+                alert('Please preprocess data first!');
+                return;
+            }
+
+            document.getElementById('trainBtn').disabled = true;
+            document.getElementById('trainingProgress').style.display = 'block';
+            trainingHistory = [];
+
+            log('Preparing training data...', 'trainingLog');
+            
+            // Prepare features and target
+            const X = processedData.map(row => {
+                const features = [];
+                
+                // Categorical features (one-hot encoded)
+                ['make', 'fuel', 'transmission', 'body', 'drivetrain'].forEach(feat => {
+                    const encoded = encoders[feat][row[feat]] || 0;
+                    features.push(encoded / Object.keys(encoders[feat]).length); // Normalize
+                });
+                
+                // Numeric features (standardized)
+                ['year', 'mileage', 'cylinders', 'doors'].forEach(feat => {
+                    const value = parseFloat(row[feat]) || 0;
+                    const standardized = (value - scaler.mean[feat]) / (scaler.std[feat] || 1);
+                    features.push(standardized);
+                });
+                
+                return features;
+            });
+            
+            const y = processedData.map(row => parseFloat(row.price));
+            
+            // Split data
+            const splitRatio = parseFloat(document.getElementById('trainTestSplit').value);
+            const splitIndex = Math.floor(X.length * splitRatio);
+            
+            const XTrain = X.slice(0, splitIndex);
+            const yTrain = y.slice(0, splitIndex);
+            const XTest = X.slice(splitIndex);
+            const yTest = y.slice(splitIndex);
+            
+            log(`Training set: ${XTrain.length} samples`, 'trainingLog');
+            log(`Test set: ${XTest.length} samples`, 'trainingLog');
+            
+            // Create and train model
+            const modelType = document.getElementById('modelType').value;
+            
+            if (modelType === 'neural_network') {
+                await trainNeuralNetwork(XTrain, yTrain, XTest, yTest);
+            } else if (modelType === 'linear_regression') {
+                await trainLinearRegression(XTrain, yTrain, XTest, yTest);
+            } else {
+                await simulateRandomForest(XTrain, yTrain, XTest, yTest);
+            }
+            
+            document.getElementById('predictBtn').disabled = false;
+        }
+
+        async function trainNeuralNetwork(XTrain, yTrain, XTest, yTest) {
+            log('Training Neural Network...', 'trainingLog');
+            
+            // Create model
+            model = tf.sequential({
+                layers: [
+                    tf.layers.dense({
+                        inputShape: [XTrain[0].length],
+                        units: 64,
+                        activation: 'relu'
+                    }),
+                    tf.layers.dropout({rate: 0.2}),
+                    tf.layers.dense({
+                        units: 32,
+                        activation: 'relu'
+                    }),
+                    tf.layers.dropout({rate: 0.2}),
+                    tf.layers.dense({
+                        units: 16,
+                        activation: 'relu'
+                    }),
+                    tf.layers.dense({
+                        units: 1,
+                        activation: 'linear'
+                    })
+                ]
+            });
+            
+            // Compile model
+            const learningRate = parseFloat(document.getElementById('learningRate').value);
+            model.compile({
+                optimizer: tf.train.adam(learningRate),
+                loss: 'meanSquaredError',
+                metrics: ['meanAbsoluteError']
+            });
+            
+            // Convert to tensors
+            const XTrainTensor = tf.tensor2d(XTrain);
+            const yTrainTensor = tf.tensor2d(yTrain, [yTrain.length, 1]);
+            const XTestTensor = tf.tensor2d(XTest);
+            const yTestTensor = tf.tensor2d(yTest, [yTest.length, 1]);
+            
+            // Training parameters
+            const epochs = parseInt(document.getElementById('epochs').value);
+            let currentEpoch = 0;
+            
+            // Train model
+            await model.fit(XTrainTensor, yTrainTensor, {
+                epochs: epochs,
+                validationData: [XTestTensor, yTestTensor],
+                batchSize: 32,
+                callbacks: {
+                    onEpochEnd: (epoch, logs) => {
+                        currentEpoch = epoch + 1;
+                        const progress = (currentEpoch / epochs) * 100;
+                        document.getElementById('trainingFill').style.width = progress + '%';
+                        
+                        trainingHistory.push({
+                            epoch: currentEpoch,
+                            loss: logs.loss,
+                            val_loss: logs.val_loss,
+                            mae: logs.meanAbsoluteError,
+                            val_mae: logs.val_meanAbsoluteError
+                        });
+                        
+                        if (currentEpoch % 10 === 0 || currentEpoch === epochs) {
+                            log(`Epoch ${currentEpoch}/${epochs} - Loss: ${logs.loss.toFixed(4)} - Val Loss: ${logs.val_loss.toFixed(4)}`, 'trainingLog');
+                        }
+                    }
+                }
+            });
+            
+            // Calculate metrics
+            const predictions = model.predict(XTestTensor);
+            const predValues = await predictions.data();
+            
+            calculateMetrics(Array.from(predValues), yTest);
+            createTrainingChart();
+            
+            log('Neural Network training completed!', 'trainingLog');
+            
+            // Clean up tensors
+            XTrainTensor.dispose();
+            yTrainTensor.dispose();
+            XTestTensor.dispose();
+            yTestTensor.dispose();
+            predictions.dispose();
+        }
+
+        async function trainLinearRegression(XTrain, yTrain, XTest, yTest) {
+            log('Training Linear Regression...', 'trainingLog');
+            
+            // Simple linear regression using TensorFlow.js
+            model = tf.sequential({
+                layers: [
+                    tf.layers.dense({
+                        inputShape: [XTrain[0].length],
+                        units: 1,
+                        activation: 'linear'
+                    })
+                ]
+            });
+            
+            model.compile({
+                optimizer: tf.train.sgd(0.01),
+                loss: 'meanSquaredError',
+                metrics: ['meanAbsoluteError']
+            });
+            
+            const XTrainTensor = tf.tensor2d(XTrain);
+            const yTrainTensor = tf.tensor2d(yTrain, [yTrain.length, 1]);
+            const XTestTensor = tf.tensor2d(XTest);
+            
+            // Simulate training progress
+            const epochs = 50;
+            for (let i = 0; i < epochs; i++) {
+                await model.fit(XTrainTensor, yTrainTensor, {
+                    epochs: 1,
+                    verbose: 0
+                });
+                
+                const progress = ((i + 1) / epochs) * 100;
+                document.getElementById('trainingFill').style.width = progress + '%';
+                
+                if (i % 10 === 0) {
+                    log(`Training progress: ${Math.round(progress)}%`, 'trainingLog');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            
+            const predictions = model.predict(XTestTensor);
+            const predValues = await predictions.data();
+            
+            calculateMetrics(Array.from(predValues), yTest);
+            
+            log('Linear Regression training completed!', 'trainingLog');
+            
+            XTrainTensor.dispose();
+            yTrainTensor.dispose();
+            XTestTensor.dispose();
+            predictions.dispose();
+        }
+
+        async function simulateRandomForest(XTrain, yTrain, XTest, yTest) {
+            log('Simulating Random Forest training...', 'trainingLog');
+            
+            // Create a simple ensemble of neural networks to simulate random forest
+            const numTrees = 5;
+            const models = [];
+            
+            for (let i = 0; i < numTrees; i++) {
+                const treeModel = tf.sequential({
+                    layers: [
+                        tf.layers.dense({
+                            inputShape: [XTrain[0].length],
+                            units: 32,
+                            activation: 'relu'
+                        }),
+                        tf.layers.dense({
+                            units: 16,
+                            activation: 'relu'
+                        }),
+                        tf.layers.dense({
+                            units: 1,
+                            activation: 'linear'
+                        })
+                    ]
+                });
+                
+                treeModel.compile({
+                    optimizer: tf.train.adam(0.001),
+                    loss: 'meanSquaredError'
+                });
+                
+                // Train each tree with subset of data
+                const sampleSize = Math.floor(XTrain.length * 0.8);
+                const indices = Array.from({length: XTrain.length}, (_, i) => i)
+                    .sort(() => Math.random() - 0.5)
+                    .slice(0, sampleSize);
+                
+                const XSample = indices.map(i => XTrain[i]);
+                const ySample = indices.map(i => yTrain[i]);
+                
+                const XSampleTensor = tf.tensor2d(XSample);
+                const ySampleTensor = tf.tensor2d(ySample, [ySample.length, 1]);
+                
+                await treeModel.fit(XSampleTensor, ySampleTensor, {
+                    epochs: 20,
+                    verbose: 0
+                });
+                
+                models.push(treeModel);
+                
+                const progress = ((i + 1) / numTrees) * 100;
+                document.getElementById('trainingFill').style.width = progress + '%';
+                log(`Trained tree ${i + 1}/${numTrees}`, 'trainingLog');
+                
+                XSampleTensor.dispose();
+                ySampleTensor.dispose();
+            }
+            
+            // Create ensemble prediction function
+            model = {
+                predict: (input) => {
+                    const predictions = models.map(m => m.predict(input));
+                    const stackedPreds = tf.stack(predictions, 1);
+                    const avgPreds = tf.mean(stackedPreds, 1);
+                    
+                    predictions.forEach(p => p.dispose());
+                    stackedPreds.dispose();
+                    
+                    return avgPreds;
+                }
+            };
+            
+            // Test ensemble
+            const XTestTensor = tf.tensor2d(XTest);
+            const predictions = model.predict(XTestTensor);
+            const predValues = await predictions.data();
+            
+            calculateMetrics(Array.from(predValues), yTest);
+            
+            log('Random Forest simulation completed!', 'trainingLog');
+            
+            XTestTensor.dispose();
+            predictions.dispose();
+        }
+
+        function calculateMetrics(predictions, actual) {
+            const n = predictions.length;
+            
+            // Mean Absolute Error
+            const mae = predictions.reduce((sum, pred, i) => sum + Math.abs(pred - actual[i]), 0) / n;
+            
+            // Mean Squared Error
+            const mse = predictions.reduce((sum, pred, i) => sum + Math.pow(pred - actual[i], 2), 0) / n;
+            
+            // Root Mean Squared Error
+            const rmse = Math.sqrt(mse);
+            
+            // R² Score
+            const actualMean = actual.reduce((a, b) => a + b, 0) / n;
+            const totalSumSquares = actual.reduce((sum, val) => sum + Math.pow(val - actualMean, 2), 0);
+            const residualSumSquares = predictions.reduce((sum, pred, i) => sum + Math.pow(actual[i] - pred, 2), 0);
+            const r2 = 1 - (residualSumSquares / totalSumSquares);
+            
+            // Display metrics
+            document.getElementById('maeValue').textContent = Math.round(mae).toLocaleString();
+            document.getElementById('mseValue').textContent = Math.round(mse).toLocaleString();
+            document.getElementById('rmseValue').textContent = Math.round(rmse).toLocaleString();
+            document.getElementById('r2Value').textContent = r2.toFixed(3);
+            
+            document.getElementById('modelMetrics').style.display = 'grid';
+            
+            log(`Model Performance - MAE: ${Math.round(mae)}, RMSE: ${Math.round(rmse)}, R²: ${r2.toFixed(3)}`, 'trainingLog');
+        }
+
+        function createTrainingChart() {
+            if (trainingHistory.length === 0) return;
+            
+            const ctx = document.getElementById('lossChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: trainingHistory.map(h => h.epoch),
+                    datasets: [{
+                        label: 'Training Loss',
+                        data: trainingHistory.map(h => h.loss),
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Validation Loss',
+                        data: trainingHistory.map(h => h.val_loss),
+                        borderColor: 'rgba(118, 75, 162, 1)',
+                        backgroundColor: 'rgba(118, 75, 162, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Training History'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Loss'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Epoch'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            document.getElementById('trainingChart').style.display = 'block';
+        }
+
+        // Populate prediction form
+        function populatePredictionForm() {
+            if (vehicleData.length === 0) return;
+            
+            // Get unique makes and models
+            const makes = [...new Set(vehicleData.map(row => row.make))].filter(m => m).sort();
+            const models = [...new Set(vehicleData.map(row => row.model))].filter(m => m).sort();
+            
+            const makeSelect = document.getElementById('predMake');
+            const modelSelect = document.getElementById('predModel');
+            
+            // Clear existing options
+            makeSelect.innerHTML = '<option value="">Select Make</option>';
+            modelSelect.innerHTML = '<option value="">Select Model</option>';
+            
+            // Populate makes
+            makes.forEach(make => {
+                const option = document.createElement('option');
+                option.value = make;
+                option.textContent = make;
+                makeSelect.appendChild(option);
+            });
+            
+            // Populate models
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model;
+                option.textContent = model;
+                modelSelect.appendChild(option);
+            });
+        }
+
+        // Price prediction
+        async function predictPrice() {
+            if (!model) {
+                alert('Please train a model first!');
+                return;
+            }
+
+            // Get form values
+            const make = document.getElementById('predMake').value;
+            const modelName = document.getElementById('predModel').value;
+            const year = parseInt(document.getElementById('predYear').value);
+            const mileage = parseInt(document.getElementById('predMileage').value);
+            const cylinders = parseInt(document.getElementById('predCylinders').value);
+            const fuel = document.getElementById('predFuel').value;
+            const transmission = document.getElementById('predTransmission').value;
+            const body = document.getElementById('predBody').value;
+            
+            // Validate inputs
+            if (!make || !modelName || !year || isNaN(mileage)) {
+                alert('Please fill in all required fields!');
+                return;
+            }
+            
+            // Prepare features (same as training)
+            const features = [];
+            
+            // Categorical features (encoded and normalized)
+            ['make', 'fuel', 'transmission', 'body', 'drivetrain'].forEach(feat => {
+                let value;
+                switch(feat) {
+                    case 'make': value = make; break;
+                    case 'fuel': value = fuel; break;
+                    case 'transmission': value = transmission; break;
+                    case 'body': value = body; break;
+                    case 'drivetrain': value = 'Front-wheel Drive'; break; // Default
+                }
+                
+                const encoded = encoders[feat] && encoders[feat][value] !== undefined ? 
+                    encoders[feat][value] : 0;
+                features.push(encoded / Math.max(Object.keys(encoders[feat] || {}).length, 1));
+            });
+            
+            // Numeric features (standardized)
+            [year, mileage, cylinders, 4].forEach((value, index) => { // 4 doors default
+                const featName = ['year', 'mileage', 'cylinders', 'doors'][index];
+                const standardized = scaler.mean[featName] && scaler.std[featName] ? 
+                    (value - scaler.mean[featName]) / scaler.std[featName] : 0;
+                features.push(standardized);
+            });
+            
+            // Make prediction
+            const inputTensor = tf.tensor2d([features]);
+            const prediction = model.predict(inputTensor);
+            const predictionValue = await prediction.data();
+            
+            // Display result
+            const predictedPrice = Math.max(0, predictionValue[0]); // Ensure positive
+            document.getElementById('predictedPrice').textContent = '
+                 + Math.round(predictedPrice).toLocaleString();
+            document.getElementById('predictionResult').style.display = 'block';
+            
+            // Clean up
+            inputTensor.dispose();
+            prediction.dispose();
+        }
+
+        // Utility function for logging
+        function log(message, elementId) {
+            const logElement = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            log('Vehicle Price Prediction System initialized', 'preprocessLog');
+            log('Ready for data upload and processing', 'trainingLog');
+        });
+    </script>
+</body>
+</html>

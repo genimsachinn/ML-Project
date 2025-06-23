@@ -1,0 +1,767 @@
+# Fraud Detection System - Complete Implementation
+# Project Structure and Core Components
+
+"""
+fraud_detection_system/
+├── src/
+│   ├── data_pipeline/
+│   │   ├── __init__.py
+│   │   ├── data_loader.py
+│   │   ├── preprocessing.py
+│   │   └── feature_engineering.py
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── base_model.py
+│   │   ├── ensemble_model.py
+│   │   ├── train_model.py
+│   │   └── model_evaluation.py
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── fraud_api.py
+│   │   └── model_serving.py
+│   ├── monitoring/
+│   │   ├── __init__.py
+│   │   └── model_monitoring.py
+│   └── utils/
+│       ├── __init__.py
+│       └── data_utils.py
+├── config/
+│   └── config.yaml
+├── tests/
+├── requirements.txt
+└── main.py
+"""
+
+# requirements.txt
+"""
+pandas>=1.5.0
+numpy>=1.21.0
+scikit-learn>=1.1.0
+xgboost>=1.6.0
+lightgbm>=3.3.0
+fastapi>=0.85.0
+uvicorn>=0.18.0
+pydantic>=1.10.0
+redis>=4.3.0
+mlflow>=1.28.0
+prometheus-client>=0.14.0
+plotly>=5.10.0
+seaborn>=0.11.0
+matplotlib>=3.5.0
+joblib>=1.1.0
+python-multipart>=0.0.5
+"""
+
+# =============================================================================
+# 1. Configuration Management
+# =============================================================================
+
+# config/config.yaml
+"""
+model:
+  name: "fraud_detection_ensemble"
+  version: "v1.0.0"
+  
+data:
+  train_size: 0.7
+  val_size: 0.15
+  test_size: 0.15
+  
+features:
+  temporal_windows: [1, 7, 14, 28]
+  amount_percentiles: [25, 50, 75, 90, 95]
+  
+api:
+  host: "0.0.0.0"
+  port: 8000
+  
+thresholds:
+  high_risk: 0.8
+  medium_risk: 0.3
+  
+monitoring:
+  model_drift_threshold: 0.05
+  performance_threshold: 0.85
+"""
+
+# =============================================================================
+# 2. Data Utilities
+# =============================================================================
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Tuple, Optional
+import logging
+from datetime import datetime, timedelta
+
+class DataUtils:
+    """Utility functions for data processing"""
+    
+    @staticmethod
+    def load_transaction_data(file_path: str) -> pd.DataFrame:
+        """Load transaction data from CSV file"""
+        try:
+            df = pd.read_csv(file_path)
+            df['TX_DATETIME'] = pd.to_datetime(df['TX_DATETIME'])
+            return df
+        except Exception as e:
+            logging.error(f"Error loading data: {e}")
+            raise
+    
+    @staticmethod
+    def validate_data_quality(df: pd.DataFrame) -> Dict:
+        """Validate data quality and return quality metrics"""
+        quality_report = {
+            'total_records': len(df),
+            'missing_values': df.isnull().sum().to_dict(),
+            'duplicate_transactions': df['TRANSACTION_ID'].duplicated().sum(),
+            'data_types': df.dtypes.to_dict(),
+            'date_range': {
+                'min_date': df['TX_DATETIME'].min(),
+                'max_date': df['TX_DATETIME'].max()
+            }
+        }
+        return quality_report
+    
+    @staticmethod
+    def temporal_split(df: pd.DataFrame, train_size: float = 0.7, 
+                      val_size: float = 0.15) -> Tuple[pd.DataFrame, ...]:
+        """Split data temporally for time-series validation"""
+        df_sorted = df.sort_values('TX_DATETIME')
+        n = len(df_sorted)
+        
+        train_end = int(n * train_size)
+        val_end = int(n * (train_size + val_size))
+        
+        train_df = df_sorted.iloc[:train_end]
+        val_df = df_sorted.iloc[train_end:val_end]
+        test_df = df_sorted.iloc[val_end:]
+        
+        return train_df, val_df, test_df
+
+# =============================================================================
+# 3. Feature Engineering
+# =============================================================================
+
+class FeatureEngineering:
+    """Advanced feature engineering for fraud detection"""
+    
+    def __init__(self, temporal_windows: List[int] = [1, 7, 14, 28]):
+        self.temporal_windows = temporal_windows
+    
+    def create_temporal_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create time-based features"""
+        df = df.copy()
+        
+        # Basic temporal features
+        df['hour'] = df['TX_DATETIME'].dt.hour
+        df['day_of_week'] = df['TX_DATETIME'].dt.dayofweek
+        df['month'] = df['TX_DATETIME'].dt.month
+        df['is_weekend'] = (df['TX_DATETIME'].dt.dayofweek >= 5).astype(int)
+        
+        # Time since epoch for calculations
+        df['timestamp'] = df['TX_DATETIME'].astype(np.int64) / 10**9
+        
+        return df
+    
+    def create_customer_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create customer behavioral features"""
+        df = df.copy()
+        df_sorted = df.sort_values(['CUSTOMER_ID', 'TX_DATETIME'])
+        
+        # Customer historical features
+        for window in self.temporal_windows:
+            # Rolling statistics
+            df[f'customer_avg_amount_{window}d'] = (
+                df_sorted.groupby('CUSTOMER_ID')['TX_AMOUNT']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .mean().reset_index(level=0, drop=True)
+            )
+            
+            df[f'customer_std_amount_{window}d'] = (
+                df_sorted.groupby('CUSTOMER_ID')['TX_AMOUNT']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .std().reset_index(level=0, drop=True).fillna(0)
+            )
+            
+            df[f'customer_tx_count_{window}d'] = (
+                df_sorted.groupby('CUSTOMER_ID')['TX_AMOUNT']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .count().reset_index(level=0, drop=True)
+            )
+            
+            df[f'customer_max_amount_{window}d'] = (
+                df_sorted.groupby('CUSTOMER_ID')['TX_AMOUNT']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .max().reset_index(level=0, drop=True)
+            )
+        
+        # Customer risk indicators
+        df['customer_account_age'] = df.groupby('CUSTOMER_ID')['timestamp'].transform(
+            lambda x: (x - x.min()) / 86400  # Days since first transaction
+        )
+        
+        # Amount deviation from customer average
+        df['amount_deviation_customer'] = (
+            df['TX_AMOUNT'] / (df['customer_avg_amount_30d'] + 1e-6)
+        )
+        
+        return df
+    
+    def create_terminal_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create terminal-based features"""
+        df = df.copy()
+        df_sorted = df.sort_values(['TERMINAL_ID', 'TX_DATETIME'])
+        
+        for window in self.temporal_windows:
+            # Terminal activity features
+            df[f'terminal_avg_amount_{window}d'] = (
+                df_sorted.groupby('TERMINAL_ID')['TX_AMOUNT']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .mean().reset_index(level=0, drop=True)
+            )
+            
+            df[f'terminal_tx_count_{window}d'] = (
+                df_sorted.groupby('TERMINAL_ID')['TX_AMOUNT']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .count().reset_index(level=0, drop=True)
+            )
+            
+            df[f'terminal_unique_customers_{window}d'] = (
+                df_sorted.groupby('TERMINAL_ID')['CUSTOMER_ID']
+                .rolling(window=f'{window}D', on='TX_DATETIME', min_periods=1)
+                .apply(lambda x: x.nunique()).reset_index(level=0, drop=True)
+            )
+        
+        # Terminal risk indicators
+        df['terminal_age'] = df.groupby('TERMINAL_ID')['timestamp'].transform(
+            lambda x: (x - x.min()) / 86400
+        )
+        
+        # Amount deviation from terminal average
+        df['amount_deviation_terminal'] = (
+            df['TX_AMOUNT'] / (df['terminal_avg_amount_30d'] + 1e-6)
+        )
+        
+        return df
+    
+    def create_transaction_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create transaction-specific features"""
+        df = df.copy()
+        
+        # Amount features
+        df['log_amount'] = np.log1p(df['TX_AMOUNT'])
+        df['amount_rounded_10'] = (df['TX_AMOUNT'] // 10) * 10
+        df['amount_rounded_100'] = (df['TX_AMOUNT'] // 100) * 100
+        df['amount_is_round'] = (df['TX_AMOUNT'] % 10 == 0).astype(int)
+        
+        # Amount percentiles (global)
+        df['amount_percentile'] = df['TX_AMOUNT'].rank(pct=True)
+        
+        # Velocity features (time between transactions)
+        df_sorted = df.sort_values(['CUSTOMER_ID', 'TX_DATETIME'])
+        df['time_since_last_tx'] = (
+            df_sorted.groupby('CUSTOMER_ID')['timestamp']
+            .diff().fillna(0) / 3600  # Hours
+        )
+        
+        # Transaction velocity (amount per hour)
+        df['tx_velocity'] = df['TX_AMOUNT'] / (df['time_since_last_tx'] + 1e-6)
+        
+        return df
+    
+    def create_network_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create customer-terminal network features"""
+        df = df.copy()
+        
+        # Customer terminal diversity
+        customer_terminals = df.groupby('CUSTOMER_ID')['TERMINAL_ID'].nunique()
+        df['customer_terminal_count'] = df['CUSTOMER_ID'].map(customer_terminals)
+        
+        # Terminal customer concentration
+        terminal_customers = df.groupby('TERMINAL_ID')['CUSTOMER_ID'].nunique()
+        df['terminal_customer_count'] = df['TERMINAL_ID'].map(terminal_customers)
+        
+        # First time customer-terminal interaction
+        df['is_new_customer_terminal'] = (~df.duplicated(
+            subset=['CUSTOMER_ID', 'TERMINAL_ID'], keep='first'
+        )).astype(int)
+        
+        return df
+    
+    def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply all feature engineering steps"""
+        logging.info("Starting feature engineering...")
+        
+        df = self.create_temporal_features(df)
+        logging.info("Temporal features created")
+        
+        df = self.create_customer_features(df)
+        logging.info("Customer features created")
+        
+        df = self.create_terminal_features(df)
+        logging.info("Terminal features created")
+        
+        df = self.create_transaction_features(df)
+        logging.info("Transaction features created")
+        
+        df = self.create_network_features(df)
+        logging.info("Network features created")
+        
+        # Handle infinite values and missing values
+        df = df.replace([np.inf, -np.inf], np.nan)
+        df = df.fillna(0)
+        
+        logging.info("Feature engineering completed")
+        return df
+
+# =============================================================================
+# 4. Model Implementation
+# =============================================================================
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.preprocessing import StandardScaler
+import xgboost as xgb
+import joblib
+
+class FraudDetectionEnsemble:
+    """Ensemble model for fraud detection"""
+    
+    def __init__(self):
+        self.models = {}
+        self.meta_model = None
+        self.scaler = StandardScaler()
+        self.feature_names = None
+        
+    def _get_base_models(self):
+        """Initialize base models"""
+        return {
+            'xgboost': xgb.XGBClassifier(
+                n_estimators=200,
+                max_depth=6,
+                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                eval_metric='logloss'
+            ),
+            'random_forest': RandomForestClassifier(
+                n_estimators=200,
+                max_depth=10,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1
+            ),
+            'logistic_regression': LogisticRegression(
+                random_state=42,
+                max_iter=1000,
+                class_weight='balanced'
+            )
+        }
+    
+    def prepare_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Prepare features for modeling"""
+        # Select feature columns (exclude target and identifiers)
+        feature_cols = [col for col in df.columns if col not in [
+            'TX_FRAUD', 'TRANSACTION_ID', 'TX_DATETIME', 'CUSTOMER_ID', 
+            'TERMINAL_ID', 'timestamp'
+        ]]
+        
+        if self.feature_names is None:
+            self.feature_names = feature_cols
+        
+        X = df[feature_cols].values
+        return X
+    
+    def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame):
+        """Train the ensemble model"""
+        logging.info("Preparing training data...")
+        X_train = self.prepare_features(train_df)
+        y_train = train_df['TX_FRAUD'].values
+        
+        X_val = self.prepare_features(val_df)
+        y_val = val_df['TX_FRAUD'].values
+        
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_val_scaled = self.scaler.transform(X_val)
+        
+        # Train base models
+        self.models = self._get_base_models()
+        val_predictions = np.zeros((len(X_val), len(self.models)))
+        
+        for i, (name, model) in enumerate(self.models.items()):
+            logging.info(f"Training {name}...")
+            
+            if name == 'logistic_regression':
+                model.fit(X_train_scaled, y_train)
+                val_predictions[:, i] = model.predict_proba(X_val_scaled)[:, 1]
+            else:
+                model.fit(X_train, y_train)
+                val_predictions[:, i] = model.predict_proba(X_val)[:, 1]
+        
+        # Train meta-model
+        logging.info("Training meta-model...")
+        self.meta_model = LogisticRegression(random_state=42)
+        self.meta_model.fit(val_predictions, y_val)
+        
+        logging.info("Training completed!")
+    
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict fraud probability"""
+        base_predictions = np.zeros((len(X), len(self.models)))
+        
+        for i, (name, model) in enumerate(self.models.items()):
+            if name == 'logistic_regression':
+                X_scaled = self.scaler.transform(X)
+                base_predictions[:, i] = model.predict_proba(X_scaled)[:, 1]
+            else:
+                base_predictions[:, i] = model.predict_proba(X)[:, 1]
+        
+        # Meta-model prediction
+        final_predictions = self.meta_model.predict_proba(base_predictions)
+        return final_predictions
+    
+    def predict(self, X: np.ndarray, threshold: float = 0.5) -> np.ndarray:
+        """Predict fraud labels"""
+        probabilities = self.predict_proba(X)[:, 1]
+        return (probabilities >= threshold).astype(int)
+    
+    def get_feature_importance(self) -> Dict:
+        """Get feature importance from base models"""
+        importance_dict = {}
+        
+        for name, model in self.models.items():
+            if hasattr(model, 'feature_importances_'):
+                importance_dict[name] = dict(zip(
+                    self.feature_names, 
+                    model.feature_importances_
+                ))
+        
+        return importance_dict
+    
+    def save_model(self, filepath: str):
+        """Save the trained model"""
+        model_data = {
+            'models': self.models,
+            'meta_model': self.meta_model,
+            'scaler': self.scaler,
+            'feature_names': self.feature_names
+        }
+        joblib.dump(model_data, filepath)
+        logging.info(f"Model saved to {filepath}")
+    
+    def load_model(self, filepath: str):
+        """Load a trained model"""
+        model_data = joblib.load(filepath)
+        self.models = model_data['models']
+        self.meta_model = model_data['meta_model']
+        self.scaler = model_data['scaler']
+        self.feature_names = model_data['feature_names']
+        logging.info(f"Model loaded from {filepath}")
+
+# =============================================================================
+# 5. Model Evaluation
+# =============================================================================
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import precision_recall_curve, roc_curve
+
+class ModelEvaluator:
+    """Comprehensive model evaluation"""
+    
+    @staticmethod
+    def evaluate_model(y_true: np.ndarray, y_pred: np.ndarray, 
+                      y_prob: np.ndarray) -> Dict:
+        """Comprehensive model evaluation"""
+        from sklearn.metrics import (
+            accuracy_score, precision_score, recall_score, f1_score,
+            confusion_matrix, classification_report
+        )
+        
+        metrics = {
+            'accuracy': accuracy_score(y_true, y_pred),
+            'precision': precision_score(y_true, y_pred),
+            'recall': recall_score(y_true, y_pred),
+            'f1_score': f1_score(y_true, y_pred),
+            'auc_roc': roc_auc_score(y_true, y_prob),
+            'confusion_matrix': confusion_matrix(y_true, y_pred),
+            'classification_report': classification_report(y_true, y_pred)
+        }
+        
+        return metrics
+    
+    @staticmethod
+    def plot_evaluation_metrics(y_true: np.ndarray, y_prob: np.ndarray):
+        """Plot ROC curve and Precision-Recall curve"""
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # ROC Curve
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        auc_score = roc_auc_score(y_true, y_prob)
+        
+        ax1.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc_score:.3f})')
+        ax1.plot([0, 1], [0, 1], 'k--')
+        ax1.set_xlabel('False Positive Rate')
+        ax1.set_ylabel('True Positive Rate')
+        ax1.set_title('ROC Curve')
+        ax1.legend()
+        ax1.grid(True)
+        
+        # Precision-Recall Curve
+        precision, recall, _ = precision_recall_curve(y_true, y_prob)
+        
+        ax2.plot(recall, precision, label='Precision-Recall Curve')
+        ax2.set_xlabel('Recall')
+        ax2.set_ylabel('Precision')
+        ax2.set_title('Precision-Recall Curve')
+        ax2.legend()
+        ax2.grid(True)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    @staticmethod
+    def fraud_scenario_analysis(df: pd.DataFrame, y_prob: np.ndarray, 
+                               threshold: float = 0.5) -> Dict:
+        """Analyze performance on different fraud scenarios"""
+        df_analysis = df.copy()
+        df_analysis['fraud_prob'] = y_prob
+        df_analysis['predicted_fraud'] = (y_prob >= threshold).astype(int)
+        
+        # Scenario 1: Amount-based fraud (>$220)
+        high_amount_mask = df_analysis['TX_AMOUNT'] > 220
+        high_amount_fraud = df_analysis[high_amount_mask]
+        
+        # Scenario 2: Terminal-based analysis
+        terminal_fraud_rates = df_analysis.groupby('TERMINAL_ID').agg({
+            'TX_FRAUD': 'mean',
+            'predicted_fraud': 'mean',
+            'TRANSACTION_ID': 'count'
+        }).rename(columns={'TRANSACTION_ID': 'tx_count'})
+        
+        # Scenario 3: Customer behavior analysis
+        customer_analysis = df_analysis.groupby('CUSTOMER_ID').agg({
+            'TX_AMOUNT': ['mean', 'std', 'max'],
+            'TX_FRAUD': 'sum',
+            'predicted_fraud': 'sum',
+            'TRANSACTION_ID': 'count'
+        })
+        
+        analysis_results = {
+            'high_amount_detection': {
+                'total_high_amount': len(high_amount_fraud),
+                'fraud_in_high_amount': high_amount_fraud['TX_FRAUD'].sum(),
+                'detected_high_amount': high_amount_fraud['predicted_fraud'].sum(),
+                'detection_rate': (high_amount_fraud['predicted_fraud'].sum() / 
+                                 len(high_amount_fraud) if len(high_amount_fraud) > 0 else 0)
+            },
+            'terminal_analysis': terminal_fraud_rates.head(10).to_dict(),
+            'customer_behavior': {
+                'customers_with_fraud': (customer_analysis[('TX_FRAUD', 'sum')] > 0).sum(),
+                'avg_fraud_per_customer': customer_analysis[('TX_FRAUD', 'sum')].mean()
+            }
+        }
+        
+        return analysis_results
+
+# =============================================================================
+# 6. FastAPI Application
+# =============================================================================
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from datetime import datetime
+import uvicorn
+
+class TransactionRequest(BaseModel):
+    transaction_id: str
+    customer_id: str
+    terminal_id: str
+    tx_amount: float
+    tx_datetime: datetime
+
+class FraudResponse(BaseModel):
+    transaction_id: str
+    fraud_probability: float
+    risk_score: float
+    decision: str
+    risk_factors: List[str]
+    processing_time_ms: int
+    model_version: str
+    timestamp: datetime
+
+# Initialize FastAPI app
+app = FastAPI(title="Fraud Detection API", version="1.0.0")
+
+# Global model instance (would be loaded at startup)
+fraud_model = None
+feature_engineer = None
+
+@app.on_event("startup")
+async def startup_event():
+    """Load model at startup"""
+    global fraud_model, feature_engineer
+    try:
+        fraud_model = FraudDetectionEnsemble()
+        # fraud_model.load_model("models/fraud_model.joblib")  # Uncomment when model exists
+        feature_engineer = FeatureEngineering()
+        logging.info("Model loaded successfully")
+    except Exception as e:
+        logging.error(f"Failed to load model: {e}")
+
+@app.post("/api/v1/fraud/detect", response_model=FraudResponse)
+async def detect_fraud(transaction: TransactionRequest):
+    """Detect fraud in real-time transaction"""
+    start_time = datetime.now()
+    
+    try:
+        # Convert request to DataFrame for feature engineering
+        tx_data = pd.DataFrame([{
+            'TRANSACTION_ID': transaction.transaction_id,
+            'CUSTOMER_ID': transaction.customer_id,
+            'TERMINAL_ID': transaction.terminal_id,
+            'TX_AMOUNT': transaction.tx_amount,
+            'TX_DATETIME': transaction.tx_datetime,
+            'TX_FRAUD': 0  # Placeholder
+        }])
+        
+        # Feature engineering (simplified for demo)
+        # In production, this would use historical data from feature store
+        tx_features = feature_engineer.create_temporal_features(tx_data)
+        tx_features = feature_engineer.create_transaction_features(tx_features)
+        
+        # Fill missing features with defaults (would come from feature store)
+        feature_cols = [col for col in tx_features.columns if col not in [
+            'TX_FRAUD', 'TRANSACTION_ID', 'TX_DATETIME', 'CUSTOMER_ID', 'TERMINAL_ID'
+        ]]
+        
+        # Dummy prediction (replace with actual model prediction)
+        fraud_probability = 0.23  # Example value
+        
+        # Decision logic
+        if fraud_probability > 0.8:
+            decision = "BLOCK"
+        elif fraud_probability > 0.3:
+            decision = "REVIEW"
+        else:
+            decision = "APPROVE"
+        
+        # Calculate processing time
+        processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        return FraudResponse(
+            transaction_id=transaction.transaction_id,
+            fraud_probability=fraud_probability,
+            risk_score=fraud_probability * 0.8,  # Example calculation
+            decision=decision,
+            risk_factors=["amount_deviation: 0.12", "customer_velocity: 0.08"],
+            processing_time_ms=processing_time,
+            model_version="v1.0.0",
+            timestamp=datetime.now()
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": datetime.now()}
+
+# =============================================================================
+# 7. Main Training Script
+# =============================================================================
+
+def main_training_pipeline(data_path: str):
+    """Main training pipeline"""
+    
+    # Setup logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Load data
+    logging.info("Loading transaction data...")
+    df = DataUtils.load_transaction_data(data_path)
+    
+    # Data quality check
+    quality_report = DataUtils.validate_data_quality(df)
+    logging.info(f"Data quality report: {quality_report}")
+    
+    # Feature engineering
+    feature_engineer = FeatureEngineering()
+    df_features = feature_engineer.engineer_features(df)
+    
+    # Split data temporally
+    train_df, val_df, test_df = DataUtils.temporal_split(df_features)
+    logging.info(f"Data split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    
+    # Train model
+    model = FraudDetectionEnsemble()
+    model.train(train_df, val_df)
+    
+    # Evaluate on test set
+    X_test = model.prepare_features(test_df)
+    y_test = test_df['TX_FRAUD'].values
+    
+    y_prob_test = model.predict_proba(X_test)[:, 1]
+    y_pred_test = model.predict(X_test, threshold=0.5)
+    
+    # Evaluation
+    evaluator = ModelEvaluator()
+    metrics = evaluator.evaluate_model(y_test, y_pred_test, y_prob_test)
+    
+    logging.info("Model Performance:")
+    for metric, value in metrics.items():
+        if metric not in ['confusion_matrix', 'classification_report']:
+            logging.info(f"{metric}: {value:.4f}")
+    
+    # Fraud scenario analysis
+    scenario_results = evaluator.fraud_scenario_analysis(test_df, y_prob_test)
+    logging.info(f"Fraud scenario analysis: {scenario_results}")
+    
+    # Save model
+    model.save_model("models/fraud_detection_model.joblib")
+    
+    # Plot evaluation metrics
+    evaluator.plot_evaluation_metrics(y_test, y_prob_test)
+    
+    return model, metrics
+
+# =============================================================================
+# 8. Example Usage and Demo
+# =============================================================================
+
+if __name__ == "__main__":
+    # Example of how to use the system
+    
+    # For training:
+    # model, metrics = main_training_pipeline("data/transactions.csv")
+    
+    # For API serving:
+    # uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # Demo with synthetic data
+    print("Fraud Detection System - Demo")
+    print("=" * 50)
+    
+    # Create synthetic transaction data
+    np.random.seed(42)
+    n_transactions = 1000
+    
+    synthetic_data = pd.DataFrame({
+        'TRANSACTION_ID': [f'TXN_{i:06d}' for i in range(n_transactions)],
+        'CUSTOMER_ID': [f'CUST_{i%200:04d}' for i in range(n_transactions)],
+        'TERMINAL_ID': [f'TERM_{i%50:03d}' for i in range(n_transactions)],
+        'TX_AMOUNT': np.random.lognormal(4, 1, n_transactions),
+        'TX_DATETIME': pd.date_range('2024-01-01', periods=n_transactions, freq='1H'),
+        'TX_FRAUD': np.random.choice([0, 1], n_transactions, p=[0.95, 0.05])
+    })
+    
+    # Apply fraud rules from problem description
+    # Rule 1: Amount > 220 is fraud
+    synthetic_data.loc[synthetic_data['TX_AMOUNT'] > 220, 'TX_FRAUD'] =
+  

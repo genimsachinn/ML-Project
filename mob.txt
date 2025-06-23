@@ -1,0 +1,552 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.tree import DecisionTreeClassifier
+import warnings
+warnings.filterwarnings('ignore')
+
+class MobilePricePredictionSystem:
+    def __init__(self):
+        self.models = {}
+        self.scaler = StandardScaler()
+        self.best_model = None
+        self.feature_importance = None
+        
+    def load_and_explore_data(self, filepath):
+        """Load and perform initial exploration of the dataset"""
+        try:
+            self.df = pd.read_csv(filepath)
+            print("Dataset loaded successfully!")
+            print(f"Dataset shape: {self.df.shape}")
+            print("\n" + "="*50)
+            print("DATASET OVERVIEW")
+            print("="*50)
+            
+            # Basic info
+            print(f"Number of samples: {len(self.df)}")
+            print(f"Number of features: {len(self.df.columns)-1}")
+            print(f"Target variable: price_range")
+            
+            # Check for missing values
+            print(f"\nMissing values: {self.df.isnull().sum().sum()}")
+            
+            # Data types
+            print(f"\nData types:")
+            print(self.df.dtypes.value_counts())
+            
+            # Target distribution
+            print(f"\nTarget distribution:")
+            print(self.df['price_range'].value_counts().sort_index())
+            
+            return self.df
+            
+        except FileNotFoundError:
+            print("File not found! Please ensure the dataset file exists.")
+            return None
+    
+    def perform_eda(self):
+        """Perform comprehensive exploratory data analysis"""
+        if not hasattr(self, 'df'):
+            print("Please load data first using load_and_explore_data()")
+            return
+            
+        print("\n" + "="*50)
+        print("EXPLORATORY DATA ANALYSIS")
+        print("="*50)
+        
+        # Statistical summary
+        print("\nStatistical Summary:")
+        print(self.df.describe())
+        
+        # Create visualizations
+        plt.figure(figsize=(20, 15))
+        
+        # 1. Target distribution
+        plt.subplot(3, 4, 1)
+        price_counts = self.df['price_range'].value_counts().sort_index()
+        plt.bar(['Low', 'Medium', 'High', 'Very High'], price_counts.values, 
+                color=['green', 'orange', 'red', 'darkred'])
+        plt.title('Price Range Distribution')
+        plt.ylabel('Count')
+        
+        # 2. Correlation heatmap
+        plt.subplot(3, 4, 2)
+        correlation_matrix = self.df.corr()
+        sns.heatmap(correlation_matrix, annot=False, cmap='coolwarm', center=0, 
+                   square=True, linewidths=0.5)
+        plt.title('Feature Correlation Matrix')
+        
+        # 3. RAM vs Price Range
+        plt.subplot(3, 4, 3)
+        sns.boxplot(data=self.df, x='price_range', y='ram')
+        plt.title('RAM vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 4. Battery Power vs Price Range
+        plt.subplot(3, 4, 4)
+        sns.boxplot(data=self.df, x='price_range', y='battery_power')
+        plt.title('Battery Power vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 5. Internal Memory vs Price Range
+        plt.subplot(3, 4, 5)
+        sns.boxplot(data=self.df, x='price_range', y='int_memory')
+        plt.title('Internal Memory vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 6. Primary Camera vs Price Range
+        plt.subplot(3, 4, 6)
+        sns.boxplot(data=self.df, x='price_range', y='pc')
+        plt.title('Primary Camera vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 7. Clock Speed vs Price Range
+        plt.subplot(3, 4, 7)
+        sns.boxplot(data=self.df, x='price_range', y='clock_speed')
+        plt.title('Clock Speed vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 8. Mobile Weight vs Price Range
+        plt.subplot(3, 4, 8)
+        sns.boxplot(data=self.df, x='price_range', y='mobile_wt')
+        plt.title('Mobile Weight vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 9. Pixel Resolution (Height) vs Price Range
+        plt.subplot(3, 4, 9)
+        sns.boxplot(data=self.df, x='price_range', y='px_height')
+        plt.title('Pixel Height vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        # 10. Feature importance from correlation with target
+        plt.subplot(3, 4, 10)
+        target_corr = self.df.corr()['price_range'].abs().sort_values(ascending=False)[1:]
+        top_features = target_corr.head(8)
+        plt.barh(range(len(top_features)), top_features.values)
+        plt.yticks(range(len(top_features)), top_features.index)
+        plt.title('Top Features by Correlation with Price')
+        plt.xlabel('Absolute Correlation')
+        
+        # 11. Boolean features distribution
+        plt.subplot(3, 4, 11)
+        bool_features = ['blue', 'dual_sim', 'four_g', 'three_g', 'touch_screen', 'wifi']
+        bool_means = [self.df[self.df['price_range']==i][bool_features].mean().mean() 
+                     for i in range(4)]
+        plt.bar(['Low', 'Med', 'High', 'V.High'], bool_means, 
+                color=['green', 'orange', 'red', 'darkred'])
+        plt.title('Average Boolean Features by Price')
+        plt.ylabel('Average Proportion')
+        
+        # 12. Talk Time vs Price Range
+        plt.subplot(3, 4, 12)
+        sns.boxplot(data=self.df, x='price_range', y='talk_time')
+        plt.title('Talk Time vs Price Range')
+        plt.xticks([0,1,2,3], ['Low', 'Med', 'High', 'V.High'])
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Print key insights
+        print("\nKEY INSIGHTS FROM EDA:")
+        print("-" * 30)
+        
+        # Top correlated features
+        target_corr = self.df.corr()['price_range'].abs().sort_values(ascending=False)
+        print(f"Top 5 features correlated with price:")
+        for i, (feature, corr) in enumerate(target_corr.head(6)[1:].items(), 1):
+            print(f"{i}. {feature}: {corr:.3f}")
+        
+        # Price range characteristics
+        print(f"\nPrice Range Characteristics:")
+        for price_range in [0, 1, 2, 3]:
+            price_name = ['Low', 'Medium', 'High', 'Very High'][price_range]
+            subset = self.df[self.df['price_range'] == price_range]
+            print(f"\n{price_name} Price Range:")
+            print(f"  - Average RAM: {subset['ram'].mean():.0f} MB")
+            print(f"  - Average Battery: {subset['battery_power'].mean():.0f} mAh")
+            print(f"  - Average Internal Memory: {subset['int_memory'].mean():.1f} GB")
+            print(f"  - 4G Support: {subset['four_g'].mean()*100:.1f}%")
+    
+    def preprocess_data(self):
+        """Prepare data for modeling"""
+        if not hasattr(self, 'df'):
+            print("Please load data first!")
+            return
+        
+        print("\n" + "="*50)
+        print("DATA PREPROCESSING")
+        print("="*50)
+        
+        # Separate features and target
+        X = self.df.drop('price_range', axis=1)
+        y = self.df['price_range']
+        
+        # Check for any remaining issues
+        print(f"Features shape: {X.shape}")
+        print(f"Target shape: {y.shape}")
+        print(f"Missing values in features: {X.isnull().sum().sum()}")
+        
+        # Split the data
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        
+        # Scale numerical features
+        numerical_features = X.select_dtypes(include=[np.number]).columns
+        self.X_train_scaled = self.X_train.copy()
+        self.X_test_scaled = self.X_test.copy()
+        
+        self.X_train_scaled[numerical_features] = self.scaler.fit_transform(
+            self.X_train[numerical_features]
+        )
+        self.X_test_scaled[numerical_features] = self.scaler.transform(
+            self.X_test[numerical_features]
+        )
+        
+        print(f"Training set size: {len(self.X_train)}")
+        print(f"Test set size: {len(self.X_test)}")
+        print("Data preprocessing completed!")
+        
+        return self.X_train_scaled, self.X_test_scaled, self.y_train, self.y_test
+    
+    def train_models(self):
+        """Train multiple models and compare performance"""
+        if not hasattr(self, 'X_train_scaled'):
+            print("Please preprocess data first!")
+            return
+        
+        print("\n" + "="*50)
+        print("MODEL TRAINING AND EVALUATION")
+        print("="*50)
+        
+        # Define models
+        models = {
+            'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42),
+            'Gradient Boosting': GradientBoostingClassifier(random_state=42),
+            'Logistic Regression': LogisticRegression(random_state=42, max_iter=1000),
+            'SVM': SVC(random_state=42),
+            'Decision Tree': DecisionTreeClassifier(random_state=42)
+        }
+        
+        # Train and evaluate models
+        results = {}
+        
+        for name, model in models.items():
+            print(f"\nTraining {name}...")
+            
+            # Cross-validation
+            cv_scores = cross_val_score(model, self.X_train_scaled, self.y_train, 
+                                      cv=5, scoring='accuracy')
+            
+            # Train on full training set
+            model.fit(self.X_train_scaled, self.y_train)
+            
+            # Predictions
+            train_pred = model.predict(self.X_train_scaled)
+            test_pred = model.predict(self.X_test_scaled)
+            
+            # Calculate metrics
+            train_acc = accuracy_score(self.y_train, train_pred)
+            test_acc = accuracy_score(self.y_test, test_pred)
+            
+            results[name] = {
+                'model': model,
+                'cv_mean': cv_scores.mean(),
+                'cv_std': cv_scores.std(),
+                'train_acc': train_acc,
+                'test_acc': test_acc,
+                'test_pred': test_pred
+            }
+            
+            print(f"Cross-validation: {cv_scores.mean():.4f} (+/- {cv_scores.std()*2:.4f})")
+            print(f"Train accuracy: {train_acc:.4f}")
+            print(f"Test accuracy: {test_acc:.4f}")
+        
+        self.models = results
+        
+        # Find best model
+        best_model_name = max(results.keys(), key=lambda x: results[x]['test_acc'])
+        self.best_model = results[best_model_name]['model']
+        self.best_model_name = best_model_name
+        
+        print(f"\nBest performing model: {best_model_name}")
+        print(f"Best test accuracy: {results[best_model_name]['test_acc']:.4f}")
+        
+        return results
+    
+    def detailed_evaluation(self):
+        """Provide detailed evaluation of the best model"""
+        if not hasattr(self, 'best_model'):
+            print("Please train models first!")
+            return
+        
+        print("\n" + "="*50)
+        print(f"DETAILED EVALUATION - {self.best_model_name}")
+        print("="*50)
+        
+        # Predictions
+        y_pred = self.best_model.predict(self.X_test_scaled)
+        
+        # Classification report
+        print("Classification Report:")
+        print(classification_report(self.y_test, y_pred, 
+                                  target_names=['Low', 'Medium', 'High', 'Very High']))
+        
+        # Confusion Matrix
+        plt.figure(figsize=(15, 5))
+        
+        plt.subplot(1, 3, 1)
+        cm = confusion_matrix(self.y_test, y_pred)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                   xticklabels=['Low', 'Medium', 'High', 'V.High'],
+                   yticklabels=['Low', 'Medium', 'High', 'V.High'])
+        plt.title('Confusion Matrix')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        
+        # Feature importance (for tree-based models)
+        if hasattr(self.best_model, 'feature_importances_'):
+            plt.subplot(1, 3, 2)
+            feature_names = self.X_train_scaled.columns
+            importances = self.best_model.feature_importances_
+            indices = np.argsort(importances)[::-1][:10]  # Top 10 features
+            
+            plt.barh(range(len(indices)), importances[indices])
+            plt.yticks(range(len(indices)), [feature_names[i] for i in indices])
+            plt.title('Top 10 Feature Importances')
+            plt.xlabel('Importance')
+            
+            # Store feature importance
+            self.feature_importance = dict(zip(feature_names, importances))
+        
+        # Model comparison
+        plt.subplot(1, 3, 3)
+        model_names = list(self.models.keys())
+        test_accuracies = [self.models[name]['test_acc'] for name in model_names]
+        
+        bars = plt.bar(model_names, test_accuracies, 
+                      color=['red' if name == self.best_model_name else 'lightblue' 
+                            for name in model_names])
+        plt.title('Model Comparison')
+        plt.ylabel('Test Accuracy')
+        plt.xticks(rotation=45)
+        
+        # Highlight best model
+        for i, (name, acc) in enumerate(zip(model_names, test_accuracies)):
+            if name == self.best_model_name:
+                bars[i].set_color('green')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Print feature importance
+        if hasattr(self.best_model, 'feature_importances_'):
+            print(f"\nTop 10 Most Important Features:")
+            sorted_features = sorted(self.feature_importance.items(), 
+                                   key=lambda x: x[1], reverse=True)
+            for i, (feature, importance) in enumerate(sorted_features[:10], 1):
+                print(f"{i:2d}. {feature:15s}: {importance:.4f}")
+    
+    def hyperparameter_tuning(self):
+        """Perform hyperparameter tuning for the best model"""
+        if not hasattr(self, 'best_model'):
+            print("Please train models first!")
+            return
+        
+        print(f"\nPerforming hyperparameter tuning for {self.best_model_name}...")
+        
+        if self.best_model_name == 'Random Forest':
+            param_grid = {
+                'n_estimators': [50, 100, 200],
+                'max_depth': [10, 20, None],
+                'min_samples_split': [2, 5, 10]
+            }
+            model = RandomForestClassifier(random_state=42)
+            
+        elif self.best_model_name == 'Gradient Boosting':
+            param_grid = {
+                'n_estimators': [50, 100, 150],
+                'learning_rate': [0.01, 0.1, 0.2],
+                'max_depth': [3, 5, 7]
+            }
+            model = GradientBoostingClassifier(random_state=42)
+            
+        else:
+            print("Hyperparameter tuning not implemented for this model type.")
+            return
+        
+        # Grid search
+        grid_search = GridSearchCV(model, param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+        grid_search.fit(self.X_train_scaled, self.y_train)
+        
+        # Update best model
+        self.best_model = grid_search.best_estimator_
+        
+        # Evaluate tuned model
+        tuned_pred = self.best_model.predict(self.X_test_scaled)
+        tuned_acc = accuracy_score(self.y_test, tuned_pred)
+        
+        print(f"Best parameters: {grid_search.best_params_}")
+        print(f"Tuned model accuracy: {tuned_acc:.4f}")
+        
+        return grid_search.best_params_
+    
+    def predict_price_range(self, phone_features):
+        """Predict price range for new phone data"""
+        if not hasattr(self, 'best_model'):
+            print("Please train models first!")
+            return None
+        
+        # Convert to DataFrame if it's a dictionary
+        if isinstance(phone_features, dict):
+            phone_df = pd.DataFrame([phone_features])
+        else:
+            phone_df = phone_features
+        
+        # Scale the features
+        phone_features_scaled = phone_df.copy()
+        numerical_features = phone_df.select_dtypes(include=[np.number]).columns
+        phone_features_scaled[numerical_features] = self.scaler.transform(
+            phone_df[numerical_features]
+        )
+        
+        # Make prediction
+        prediction = self.best_model.predict(phone_features_scaled)
+        probability = self.best_model.predict_proba(phone_features_scaled)
+        
+        price_labels = ['Low', 'Medium', 'High', 'Very High']
+        
+        result = {
+            'predicted_price_range': price_labels[prediction[0]],
+            'confidence': max(probability[0]),
+            'all_probabilities': dict(zip(price_labels, probability[0]))
+        }
+        
+        return result
+
+# Example usage and demonstration
+def demonstrate_system():
+    """Demonstrate the mobile price prediction system"""
+    
+    print("="*60)
+    print("MOBILE PHONE PRICE PREDICTION SYSTEM")
+    print("="*60)
+    
+    # Initialize the system
+    predictor = MobilePricePredictionSystem()
+    
+    # For demonstration, we'll create sample data since we don't have the actual file
+    print("\nCreating sample dataset for demonstration...")
+    
+    # Generate sample data that mimics the real dataset structure
+    np.random.seed(42)
+    n_samples = 2000
+    
+    sample_data = {
+        'battery_power': np.random.randint(500, 2000, n_samples),
+        'blue': np.random.randint(0, 2, n_samples),
+        'clock_speed': np.random.uniform(0.5, 3.0, n_samples),
+        'dual_sim': np.random.randint(0, 2, n_samples),
+        'fc': np.random.randint(0, 20, n_samples),
+        'four_g': np.random.randint(0, 2, n_samples),
+        'int_memory': np.random.randint(2, 64, n_samples),
+        'm_dep': np.random.uniform(0.1, 1.0, n_samples),
+        'mobile_wt': np.random.randint(80, 200, n_samples),
+        'n_cores': np.random.randint(1, 9, n_samples),
+        'pc': np.random.randint(0, 21, n_samples),
+        'px_height': np.random.randint(0, 2000, n_samples),
+        'px_width': np.random.randint(500, 2000, n_samples),
+        'ram': np.random.randint(256, 4000, n_samples),
+        'sc_h': np.random.uniform(5, 20, n_samples),
+        'sc_w': np.random.uniform(0, 18, n_samples),
+        'talk_time': np.random.randint(2, 25, n_samples),
+        'three_g': np.random.randint(0, 2, n_samples),
+        'touch_screen': np.random.randint(0, 2, n_samples),
+        'wifi': np.random.randint(0, 2, n_samples),
+    }
+    
+    # Create realistic price ranges based on features
+    price_range = []
+    for i in range(n_samples):
+        score = (sample_data['ram'][i] * 0.0008 + 
+                sample_data['battery_power'][i] * 0.0005 + 
+                sample_data['px_height'][i] * 0.0003 + 
+                sample_data['int_memory'][i] * 0.02 +
+                sample_data['four_g'][i] * 0.3 + 
+                sample_data['pc'][i] * 0.05)
+        
+        if score < 1.5:
+            price_range.append(0)  # Low
+        elif score < 2.5:
+            price_range.append(1)  # Medium
+        elif score < 3.5:
+            price_range.append(2)  # High
+        else:
+            price_range.append(3)  # Very High
+    
+    sample_data['price_range'] = price_range
+    
+    # Create DataFrame
+    predictor.df = pd.DataFrame(sample_data)
+    
+    # Run the analysis pipeline
+    print(f"Dataset created with {len(predictor.df)} samples")
+    print("\nRunning complete analysis pipeline...")
+    
+    # 1. Exploratory Data Analysis
+    predictor.perform_eda()
+    
+    # 2. Preprocess data
+    predictor.preprocess_data()
+    
+    # 3. Train models
+    predictor.train_models()
+    
+    # 4. Detailed evaluation
+    predictor.detailed_evaluation()
+    
+    # 5. Hyperparameter tuning
+    predictor.hyperparameter_tuning()
+    
+    # 6. Demonstrate prediction
+    print("\n" + "="*50)
+    print("SAMPLE PREDICTIONS")
+    print("="*50)
+    
+    # Example phone configurations
+    sample_phones = [
+        {
+            'battery_power': 1800, 'blue': 1, 'clock_speed': 2.5, 'dual_sim': 1,
+            'fc': 8, 'four_g': 1, 'int_memory': 32, 'm_dep': 0.5, 'mobile_wt': 150,
+            'n_cores': 4, 'pc': 12, 'px_height': 1200, 'px_width': 800, 'ram': 2000,
+            'sc_h': 15, 'sc_w': 8, 'talk_time': 18, 'three_g': 1, 'touch_screen': 1, 'wifi': 1
+        },
+        {
+            'battery_power': 1000, 'blue': 0, 'clock_speed': 1.0, 'dual_sim': 0,
+            'fc': 2, 'four_g': 0, 'int_memory': 8, 'm_dep': 0.3, 'mobile_wt': 120,
+            'n_cores': 2, 'pc': 5, 'px_height': 600, 'px_width': 400, 'ram': 512,
+            'sc_h': 12, 'sc_w': 6, 'talk_time': 10, 'three_g': 1, 'touch_screen': 1, 'wifi': 0
+        }
+    ]
+    
+    for i, phone in enumerate(sample_phones, 1):
+        print(f"\nSample Phone {i}:")
+        result = predictor.predict_price_range(phone)
+        print(f"Predicted Price Range: {result['predicted_price_range']}")
+        print(f"Confidence: {result['confidence']:.3f}")
+        print("All probabilities:")
+        for price_cat, prob in result['all_probabilities'].items():
+            print(f"  {price_cat}: {prob:.3f}")
+    
+    return predictor
+
+# Run the demonstration
+if __name__ == "__main__":
+    system = demonstrate_system()
